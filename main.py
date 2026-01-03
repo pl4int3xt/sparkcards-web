@@ -4,6 +4,7 @@ import requests
 from flask import Flask, request, jsonify, redirect
 from google.auth import default
 from google.auth.transport.requests import Request
+import os
 
 app = Flask(__name__)
 
@@ -14,6 +15,14 @@ SIGNER_SA_EMAIL = "wallet-backend@YOUR_PROJECT.iam.gserviceaccount.com"
 
 WALLET_OBJECTS_BASE = "https://walletobjects.googleapis.com/walletobjects/v1"
 IAM_SIGNJWT_URL = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{SIGNER_SA_EMAIL}:signJwt"
+
+BUILD_SHA = os.getenv("K_REVISION", "unknown")  # Cloud Run revision id
+
+@app.get("/__version")
+def version():
+    return {
+        "revision": BUILD_SHA
+    }
 
 
 def get_access_token():
