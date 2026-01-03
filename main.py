@@ -1,108 +1,110 @@
-from __future__ import annotations
-
+# main.py
 import os
-import json
 import time
-import secrets
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
-
+import json
 import requests
+
 from flask import Flask, request, jsonify
-from google.auth import default as google_auth_default
-from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+from google.auth.crypt import RSASigner
+from google.auth import jwt as google_jwt
 
 app = Flask(__name__)
 
-WALLET_OBJECTS_BASE = "https://walletobjects.googleapis.com/walletobjects/v1"
-IAM_CREDENTIALS_BASE = "https://iamcredentials.googleapis.com/v1"
+# ---------------- CONFIG ----------------
+
+KEYFILE = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]  # path to JSON
+ISSUER_ID = os.environ["ISSUER_ID"]
+CLASS_ID = os.environ["CLASS_ID"]
+
+BUSINESS_NAME = os.environ.get("BUSINESS_NAME", "Coffee Madrid")
+TOTAL = int(os.environ.get("TOTAL", "8"))
+IMG_BASE = os.environ.get("IMG_BASE", "https://pl4int3xt.github.io")
+
+API_BASE = "https://walletobjects.googleapis.com/walletobjects/v1"
+SCOPES = ["https://www.googleapis.com/auth/wallet_object.issuer"]
+
+# ----------------------------------------
 
 
-@dataclass
-class IssueResult:
-    object_id: str
-    save_url: str
-
-
-class IssueError(RuntimeError):
-    pass
-
-
-def _get_env(name: str, default: Optional[str] = None) -> str:
-    val = os.getenv(name, default)
-    if not val:
-        raise IssueError(f"Missing required env var: {name}")
-    return val
-
-
-def _get_access_token() -> str:
-    creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    creds.refresh(GoogleAuthRequest())
+def get_access_token():
+    creds = service_account.Credentials.from_service_account_file(
+        KEYFILE, scopes=SCOPES
+    )
+    creds.refresh(Request())
     return creds.token
 
 
-def _headers(access_token: str) -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-
-
-def _post_json(url: str, access_token: str, payload: Dict[str, Any]) -> requests.Response:
-    return requests.post(url, headers=_headers(access_token), data=json.dumps(payload), timeout=20)
-
-
-def _generate_object_id(issuer_id: str) -> str:
-    return f"{issuer_id}.user_{int(time.time())}_{secrets.token_hex(6)}"
-
-
-def _create_generic_object(token, object_id, class_id, user_name, app_title):
-    r = _post_json(
-        f"{WALLET_OBJECTS_BASE}/genericObject",
-        token,
-        {
-            "id": object_id,
-            "classId": class_id,
-            "state": "ACTIVE",
-            "cardTitle": {"defaultValue": {"language": "en", "value": app_title}},
-            "header": {"defaultValue": {"language": "en", "value": user_name}},
-        },
+def create_object(token, client_name: str, stamp_n: int = 0):
+    object_id = (
+        f"{ISSUER_ID}.user_"
+        f"{client_name.lower().replace(' ', '_')}_"
+        f"{int(time.time())}"
     )
-    if r.status_code not in (200, 201, 409):
-        raise IssueError(f"Wallet error {r.status_code}: {r.text}")
 
+    body = {
+        "id": object_id,
+        "classId": CLASS_ID,
+        "state": "ACTIVE",
 
-def issue_pass(user_name: str) -> IssueResult:
-    issuer_id = _get_env("ISSUER_ID")
-    class_id = _get_env("CLASS_ID")
-    signer_sa_email = _get_env("SIGNER_SA_EMAIL")
-    app_title = _get_env("APP_TITLE", "SparkCards")
+        "cardTitle": {
+            "defaultValue": {"language": "en-US", "value": BUSINESS_NAME}
+        },
+        "subheader": {
+            "defaultValue": {"language": "en-US", "value": client_name}
+        },
 
-    token = _get_access_token()
-    object_id = _generate_object_id(issuer_id)
+        "heroImage": {
+            "sourceUri": {"uri": f"{IMG_BASE}/stamps_{stamp_n}.png"}
+        },
 
-    _create_generic_object(token, object_id, class_id, user_name, app_title)
-
-    jwt_claims = {
-        "iss": signer_sa_email,
-        "aud": "google",
-        "typ": "savetowallet",
-        "iat": int(time.time()),
-        "payload": {"genericObjects": [{"id": object_id}]},
+        "textModulesData": [
+            {"header": "Stamps", "body": f"{stamp_n} / {TOTAL}"},
+            {"header": "Reward", "body": "Free coffee"},
+        ],
     }
 
     r = requests.post(
-        f"{IAM_CREDENTIALS_BASE}/projects/-/serviceAccounts/{signer_sa_email}:signJwt",
-        headers=_headers(token),
-        json={"payload": json.dumps(jwt_claims)},
-        timeout=20,
+        f"{API_BASE}/genericObject",
+        headers={"Authorization": f"Bearer {token}"},
+        json=body,
+        timeout=30,
     )
-    if r.status_code != 200:
-        raise IssueError(f"signJwt failed: {r.text}")
 
-    save_url = f"https://pay.google.com/gp/v/save/{r.json()['signedJwt']}"
-    return IssueResult(object_id, save_url)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"Wallet create failed {r.status_code}: {r.text}")
 
+    return object_id
+
+
+def generate_save_url(object_id: str):
+    with open(KEYFILE, "r", encoding="utf-8") as f:
+        sa = json.load(f)
+
+    now = int(time.time())
+    claims = {
+        "iss": sa["client_email"],
+        "aud": "google",
+        "typ": "savetowallet",
+        "iat": now,
+        "exp": now + 3600,
+        "payload": {
+            "genericObjects": [
+                {"id": object_id, "classId": CLASS_ID}
+            ]
+        },
+    }
+
+    signer = RSASigner.from_service_account_info(sa)
+    signed = google_jwt.encode(signer, claims)
+    if isinstance(signed, bytes):
+        signed = signed.decode("utf-8")
+
+    return f"https://pay.google.com/gp/v/save/{signed}"
+
+
+# ---------------- ROUTES ----------------
 
 @app.get("/")
 def health():
@@ -112,6 +114,21 @@ def health():
 @app.get("/issue")
 def issue():
     name = request.args.get("name", "Test User")
-    res = issue_pass(name)
-    return jsonify({"objectId": res.object_id, "saveUrl": res.save_url})
+
+    token = get_access_token()
+    object_id = create_object(token, name)
+    save_url = generate_save_url(object_id)
+
+    return jsonify({
+        "ok": True,
+        "objectId": object_id,
+        "saveUrl": save_url
+    })
+
+
+# ----------------------------------------
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port)
 
