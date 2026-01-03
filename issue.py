@@ -8,10 +8,11 @@ Design goals:
 - Signs the "Save to Google Wallet" JWT via IAMCredentials signJwt
 - Creates a Wallet Object (Generic by default) and returns a save URL
 
-Prereqs (env vars):
+Required env vars (Cloud Run → Edit → Variables & Secrets):
 - ISSUER_ID            e.g. "1234567890123456789"
 - CLASS_ID             e.g. "1234567890123456789.sparkcards_class"
 - SIGNER_SA_EMAIL      e.g. "wallet-backend@your-project.iam.gserviceaccount.com"
+
 Optional:
 - OBJECT_TYPE          "generic" (default) or "loyalty"
 - APP_TITLE            e.g. "SparkCards" (default)
@@ -20,6 +21,7 @@ Optional:
 from __future__ import annotations
 
 import json
+import os
 import time
 import secrets
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from typing import Optional, Dict, Any
 import requests
 from google.auth import default as google_auth_default
 from google.auth.transport.requests import Request as GoogleAuthRequest
+
 
 WALLET_OBJECTS_BASE = "https://walletobjects.googleapis.com/walletobjects/v1"
 IAM_CREDENTIALS_BASE = "https://iamcredentials.googleapis.com/v1"
@@ -44,22 +47,22 @@ class IssueError(RuntimeError):
 
 
 def _get_env(name: str, default: Optional[str] = None) -> str:
-    import os
-
     val = os.getenv(name, default)
-    if not val:
+    if val is None or str(val).strip() == "":
         raise IssueError(f"Missing required env var: {name}")
-    return val
+    return str(val)
 
 
 def _get_access_token() -> str:
     # Cloud Run provides ADC automatically when the service runs as a service account.
     creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     creds.refresh(GoogleAuthRequest())
+    if not creds.token:
+        raise IssueError("Failed to obtain access token from ADC")
     return creds.token
 
 
-def _wallet_headers(access_token: str) -> Dict[str, str]:
+def _headers(access_token: str) -> Dict[str, str]:
     return {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -67,10 +70,10 @@ def _wallet_headers(access_token: str) -> Dict[str, str]:
 
 
 def _post_json(url: str, access_token: str, payload: Dict[str, Any], timeout: int = 20) -> requests.Response:
-    return requests.post(url, headers=_wallet_headers(access_token), data=json.dumps(payload), timeout=timeout)
+    return requests.post(url, headers=_headers(access_token), data=json.dumps(payload), timeout=timeout)
 
 
-def _generate_object_id(issuer_id: str, prefix: str = "u") -> str:
+def _generate_object_id(issuer_id: str, prefix: str = "user") -> str:
     # Object IDs must be: "<issuerId>.<uniqueSuffix>"
     suffix = f"{prefix}_{int(time.time())}_{secrets.token_hex(6)}"
     return f"{issuer_id}.{suffix}"
@@ -105,12 +108,18 @@ def _create_loyalty_object(access_token: str, object_id: str, class_id: str, use
 
 
 def _sign_jwt_with_iam(access_token: str, signer_sa_email: str, jwt_claims: Dict[str, Any]) -> str:
+    # signJwt signs the "payload" (claims) and returns a compact signed JWT.
     url = f"{IAM_CREDENTIALS_BASE}/projects/-/serviceAccounts/{signer_sa_email}:signJwt"
     body = {"payload": json.dumps(jwt_claims)}
-    r = requests.post(url, headers=_wallet_headers(access_token), data=json.dumps(body), timeout=20)
+    r = requests.post(url, headers=_headers(access_token), data=json.dumps(body), timeout=20)
     if r.status_code != 200:
         raise IssueError(f"IAM signJwt failed {r.status_code}: {r.text}")
-    return r.json()["signedJwt"]
+
+    data = r.json()
+    signed = data.get("signedJwt")
+    if not signed:
+        raise IssueError(f"IAM signJwt response missing signedJwt: {data}")
+    return signed
 
 
 def issue_pass(user_name: str, object_id: Optional[str] = None) -> IssueResult:
@@ -138,7 +147,11 @@ def issue_pass(user_name: str, object_id: Optional[str] = None) -> IssueResult:
         "aud": "google",
         "typ": "savetowallet",
         "iat": now,
-        "payload": {payload_key: [{"id": object_id}]},
+        "payload": {
+            payload_key: [
+                {"id": object_id}
+            ]
+        }
     }
 
     signed_jwt = _sign_jwt_with_iam(access_token, signer_sa_email, jwt_claims)
