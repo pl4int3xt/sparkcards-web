@@ -5,6 +5,8 @@ from flask import Flask, request, jsonify, redirect
 from google.auth import default
 from google.auth.transport.requests import Request
 import os
+from issue import issue_pass, IssueError
+
 
 app = Flask(__name__)
 
@@ -109,6 +111,11 @@ def issue_get():
     name = request.args.get("name", "Test User")
     try:
         res = issue_pass(user_name=name)
-        return jsonify({"ok": True, "objectId": res.object_id, "saveUrl": res.save_url})
+        return jsonify({
+            "ok": True,
+            "objectId": res.object_id,
+            "saveUrl": res.save_url
+        })
     except IssueError as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
