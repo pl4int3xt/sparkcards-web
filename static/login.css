@@ -1,0 +1,104 @@
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #fff;
+  color: #111;
+}
+
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 14px;
+}
+
+.card {
+  width: min(560px, 100%);
+}
+
+h1 {
+  font-size: 48px;
+  margin: 0 0 10px 0;
+  letter-spacing: -1px;
+}
+
+p.sub {
+  margin: 0 0 22px 0;
+  color: #666;
+  font-size: 20px;
+}
+
+.top-error {
+  display: none;
+  background: #ffecec;
+  border: 1px solid #ffb3b3;
+  color: #a40000;
+  padding: 12px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+label {
+  font-size: 16px;
+}
+
+input {
+  width: 100%;
+  padding: 16px;
+  font-size: 18px;
+  border: 2px solid #ddd;
+  border-radius: 18px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+input:focus {
+  border-color: #111;
+}
+
+.invalid input {
+  border-color: #d00 !important;
+}
+
+.invalid label {
+  color: #d00;
+}
+
+/* intl-tel-input spacing */
+.iti {
+  width: 100%;
+}
+
+.iti--separate-dial-code input {
+  padding-left: 120px !important;
+}
+
+.wallet-btn {
+  width: 100%;
+  padding: 18px;
+  font-size: 20px;
+  border-radius: 22px;
+  border: 2px solid #111;
+  background: #fff;
+  cursor: pointer;
+}
+
+.wallet-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin-top: 14px;
+  color: #666;
+  font-size: 16px;
+}
+
