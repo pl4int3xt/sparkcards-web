@@ -14,6 +14,15 @@ from google.oauth2 import service_account
 from google.auth.crypt import RSASigner
 from google.auth import jwt as google_jwt
 
+#Firebase stuff
+import firebase_admin
+from firebase_admin import firestore
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
+db = firestore.client()
+
+
+
 app = Flask(__name__)
 
 API_BASE = "https://walletobjects.googleapis.com/walletobjects/v1"
@@ -222,9 +231,18 @@ def home():
 """.strip()
 
 
-@app.get("/health")
-def health():
-    return jsonify(ok=True)
+@app.get("/health/firestore")
+def fs_health():
+    ref = db.collection("healthcheck").document("ping")
+    ref.set({"ts": firestore.SERVER_TIMESTAMP})
+    return {"ok": True}
+
+
+
+
+
+
+
 
 
 @app.post("/issue")
