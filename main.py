@@ -244,6 +244,7 @@ def firestore_health():
 
 
 
+
 @app.post("/issue")
 def issue():
     data = request.get_json(silent=True) or {}
@@ -270,8 +271,8 @@ def issue():
         object_id = f"{ISSUER_ID}.cmv2_{safe_name}_{int(time.time())}"
 
     try:
+        # 1️⃣ Wallet logic (unchanged)
         token = get_access_token()
-
         create_generic_object(
             token=token,
             class_id=class_id,
@@ -283,15 +284,40 @@ def issue():
             total=total,
         )
 
-        # 🔧 FIX 1: restore save_url
-        save_url = create_save_url(object_id)
+        save_url = generate_save_url(object_id, class_id)
 
-        # Firestore
-        db = get_db()
-        db.collection("cards").document(object_id).set(
-            {
-                "objectId": object_id,
-                "class
+        # 2️⃣ Firestore write (NEW, isolated, safe)
+        try:
+            db = get_db()
+            db.collection("cards").document(object_id).set(
+                {
+                    "objectId": object_id,
+                    "classId": class_id,
+                    "businessName": business_name,
+                    "clientName": client_name,
+                    "birthday": birthday or None,
+                    "phone": phone or None,
+                    "stampCount": stamp_n,
+                    "stampTotal": total,
+                    "createdAt": SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+        except Exception as fs_err:
+            # 🔐 IMPORTANT: do NOT break pass creation if Firestore fails
+            print("Firestore write failed:", fs_err)
+
+        # 3️⃣ Response (unchanged)
+        return jsonify(
+            ok=True,
+            class_id=class_id,
+            object_id=object_id,
+            save_url=save_url,
+            keyfile_used=resolve_keyfile_path(),
+        )
+
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
 
 
 
