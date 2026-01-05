@@ -15,10 +15,14 @@ from google.auth.crypt import RSASigner
 from google.auth import jwt as google_jwt
 
 #Firebase stuff
+import firebase_admin
 from firebase_admin import firestore
-db = firestore.client()
-db.collection("healthcheck").document("ping").set({"ok": True})
-
+from google.cloud.firestore import SERVER_TIMESTAMP
+def get_db():
+    # Initialize only once per container
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app()
+    return firestore.client()
 
 app = Flask(__name__)
 
@@ -228,6 +232,15 @@ def home():
 """.strip()
 
 
+
+@app.get("/health/firestore")
+def firestore_health():
+    db = get_db()
+    db.collection("healthcheck").document("ping").set({
+        "ok": True,
+        "ts": SERVER_TIMESTAMP
+    })
+    return {"firestore": "ok"}
 
 
 
