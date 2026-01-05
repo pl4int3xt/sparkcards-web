@@ -369,6 +369,44 @@ def award_stamp():
         return jsonify(ok=False, error=str(e)), 500
 
 
+#LISTING FIREBASE
+@app.get("/cards_list")
+def list_cards():
+    db = get_db()
+
+    docs = (
+        db.collection("cards")
+        .order_by("createdAt", direction=firestore.Query.DESCENDING)
+        .limit(20)
+        .get()
+    )
+
+    return {
+        "count": len(docs),
+        "cards": [
+            {
+                "object_id": doc.id,
+                "clientName": doc.to_dict().get("clientName"),
+                "createdAt": doc.to_dict().get("createdAt"),
+            }
+            for doc in docs
+        ]
+    }
+
+@app.get("/card/<object_id>")
+def read_card(object_id):
+    db = get_db()
+    doc = db.collection("cards").document(object_id).get()
+
+    if not doc.exists:
+        return {"ok": False, "error": "Card not found"}, 404
+
+    return {
+        "ok": True,
+        "card": doc.to_dict()
+    }
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
