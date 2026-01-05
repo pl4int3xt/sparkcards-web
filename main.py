@@ -272,7 +272,6 @@ def issue():
     try:
         token = get_access_token()
 
-        # 1️⃣ Create / patch Google Wallet object
         create_generic_object(
             token=token,
             class_id=class_id,
@@ -284,34 +283,15 @@ def issue():
             total=total,
         )
 
-        # 2️⃣ Store card + customer data in Firestore
-        db = get_db()
+        # 🔧 FIX 1: restore save_url
+        save_url = create_save_url(object_id)
 
-        card_ref = db.collection("cards").document(object_id)
-        card_ref.set(
+        # Firestore
+        db = get_db()
+        db.collection("cards").document(object_id).set(
             {
                 "objectId": object_id,
-                "classId": class_id,
-                "businessName": business_name,
-                "clientName": client_name,
-                "birthday": birthday or None,
-                "phone": phone or None,
-                "stampCount": stamp_n,
-                "stampTotal": total,
-                "createdAt": SERVER_TIMESTAMP,
-            },
-            merge=True,
-        )
-
-        return jsonify(
-            ok=True,
-            class_id=class_id,
-            object_id=object_id,
-            save_url=save_url,
-        )
-
-    except Exception as e:
-        return jsonify(ok=False, error=str(e)), 500
+                "class
 
 
 
