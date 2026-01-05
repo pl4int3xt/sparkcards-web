@@ -15,7 +15,6 @@ from google.auth.crypt import RSASigner
 from google.auth import jwt as google_jwt
 
 #Firebase stuff
-import firebase_admin
 from firebase_admin import firestore
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
