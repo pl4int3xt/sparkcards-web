@@ -233,7 +233,7 @@ def home():
 
 
 
-@app.get("/health/firestore")
+@app.get("/health")
 def firestore_health():
     db = get_db()
     db.collection("healthcheck").document("ping").set({
@@ -244,20 +244,8 @@ def firestore_health():
 
 
 
-
 @app.post("/issue")
 def issue():
-    """
-    Creates/patches a GenericObject under a class, then returns a Save URL.
-    Accepts JSON:
-      - client_name (default: "Gonzalo")
-      - stamp_n (default: 0)
-      - total (default: env TOTAL or 8)
-      - business_name (default: env BUSINESS_NAME or "Coffee Madrid")
-      - img_base (default: env IMG_BASE or "https://pl4int3xt.github.io")
-      - class_id (default: f"{ISSUER_ID}.coffee_madrid_loyalty_v2")
-      - object_id (optional; if not provided, auto-generated)
-    """
     data = request.get_json(silent=True) or {}
 
     client_name = (data.get("client_name") or os.environ.get("CLIENT_NAME") or "Gonzalo").strip()
@@ -269,19 +257,22 @@ def issue():
 
     class_id = (data.get("class_id") or f"{ISSUER_ID}.coffee_madrid_loyalty_v2").strip()
 
+    birthday = (data.get("birthday") or "").strip()
+    phone = (data.get("phone") or "").strip()
+
     object_id = (data.get("object_id") or "").strip()
 
     if object_id:
-        # Login manda deviceId (sin punto). Wallet necesita ISSUER_ID.something
         if "." not in object_id:
             object_id = f"{ISSUER_ID}.user_{object_id}"
     else:
         safe_name = client_name.lower().replace(" ", "_")
         object_id = f"{ISSUER_ID}.cmv2_{safe_name}_{int(time.time())}"
-    
 
     try:
         token = get_access_token()
+
+        # 1️⃣ Create / patch Google Wallet object
         create_generic_object(
             token=token,
             class_id=class_id,
@@ -292,17 +283,35 @@ def issue():
             stamp_n=stamp_n,
             total=total,
         )
-        save_url = generate_save_url(object_id, class_id)
+
+        # 2️⃣ Store card + customer data in Firestore
+        db = get_db()
+
+        card_ref = db.collection("cards").document(object_id)
+        card_ref.set(
+            {
+                "objectId": object_id,
+                "classId": class_id,
+                "businessName": business_name,
+                "clientName": client_name,
+                "birthday": birthday or None,
+                "phone": phone or None,
+                "stampCount": stamp_n,
+                "stampTotal": total,
+                "createdAt": SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
         return jsonify(
             ok=True,
             class_id=class_id,
             object_id=object_id,
             save_url=save_url,
-            keyfile_used=resolve_keyfile_path(),
         )
+
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
-
 
 
 
