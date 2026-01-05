@@ -4,6 +4,7 @@ import json
 import base64
 from typing import Optional
 import html
+import re
 
 import requests
 from flask import Flask, request, jsonify, render_template
@@ -151,6 +152,59 @@ def generate_save_url(object_id: str, class_id: str) -> str:
 
     return f"https://pay.google.com/gp/v/save/{signed}"
 
+def get_generic_object(token: str, object_id: str) -> dict:
+    r = requests.get(
+        f"{API_BASE}/genericObject/{object_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Get object failed: {r.status_code} {r.text[:2000]}")
+    return r.json()
+
+
+def patch_generic_object(token: str, object_id: str, patch_body: dict) -> dict:
+    r = requests.patch(
+        f"{API_BASE}/genericObject/{object_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json=patch_body,
+        timeout=30,
+    )
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"Patch object failed: {r.status_code} {r.text[:2000]}")
+    return r.json()
+
+
+def parse_current_stamps_from_object(obj: dict) -> int:
+    """
+    Your object uses:
+      header: "Stamps to next reward"
+      body:   "<n> / <total>"
+    If missing, returns 0.
+    """
+    tmd = obj.get("textModulesData", []) or []
+    for m in tmd:
+        if (m.get("header") or "").strip().lower() == "stamps to next reward":
+            body = (m.get("body") or "").strip()
+            match = re.search(r"(\d+)\s*/\s*(\d+)", body)
+            if match:
+                return int(match.group(1))
+    return 0
+
+
+def build_award_stamp_patch(img_base: str, new_stamp_n: int, total: int) -> dict:
+    """
+    Keep EXACT module headers you already use in create_generic_object().
+    Only change heroImage and the stamp counter text.
+    """
+    return {
+        "heroImage": {"sourceUri": {"uri": f"{img_base}/stamps_{new_stamp_n}.png"}},
+        "textModulesData": [
+            {"header": "Stamps to next reward", "body": f"{new_stamp_n} / {total}"},
+            {"header": "Rewards collected", "body": "0"},
+            {"header": "Reward", "body": "Free coffee"},
+        ],
+    }
 
 @app.get("/")
 def home():
@@ -238,6 +292,48 @@ def issue():
 def login_get():
     return render_template("login.html")
 
+@app.post("/award_stamp")
+def award_stamp():
+    """
+    Adds exactly +1 stamp by:
+      1) GET current object
+      2) parse current stamp count from "Stamps to next reward"
+      3) PATCH heroImage + that module (capped at total)
+
+    JSON:
+      - object_id (required)  OR passId (alias)
+      - total (optional; defaults to env TOTAL or 8)
+      - img_base (optional; defaults to env IMG_BASE or https://pl4int3xt.github.io)
+    """
+    data = request.get_json(silent=True) or {}
+
+    object_id = (data.get("object_id") or data.get("passId") or "").strip()
+    if not object_id:
+        return jsonify(ok=False, error="missing object_id (or passId)"), 400
+
+    img_base = (data.get("img_base") or os.environ.get("IMG_BASE") or "https://pl4int3xt.github.io").strip()
+    total = int(data.get("total") or os.environ.get("TOTAL") or 8)
+
+    try:
+        token = get_access_token()
+
+        obj = get_generic_object(token, object_id)
+        current = parse_current_stamps_from_object(obj)
+        new_stamp_n = min(current + 1, total)
+
+        patch_body = build_award_stamp_patch(img_base=img_base, new_stamp_n=new_stamp_n, total=total)
+        patched = patch_generic_object(token, object_id, patch_body)
+
+        return jsonify(
+            ok=True,
+            object_id=object_id,
+            previous=current,
+            new_stamp_n=new_stamp_n,
+            total=total,
+            hero_image=f"{img_base}/stamps_{new_stamp_n}.png",
+        )
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
 
 
 if __name__ == "__main__":
