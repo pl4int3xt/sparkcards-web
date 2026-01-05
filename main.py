@@ -16,10 +16,8 @@ from google.auth import jwt as google_jwt
 
 #Firebase stuff
 from firebase_admin import firestore
-if not firebase_admin._apps:
-    firebase_admin.initialize_app()
 db = firestore.client()
-
+db.collection("healthcheck").document("ping").set({"ok": True})
 
 
 app = Flask(__name__)
@@ -228,16 +226,6 @@ def home():
   </body>
 </html>
 """.strip()
-
-
-@app.get("/health/firestore")
-def fs_health():
-    ref = db.collection("healthcheck").document("ping")
-    ref.set({"ts": firestore.SERVER_TIMESTAMP})
-    return {"ok": True}
-
-
-
 
 
 
