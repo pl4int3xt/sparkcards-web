@@ -295,8 +295,8 @@ def issue():
                     "classId": class_id,
                     "businessName": business_name,
                     "clientName": client_name,
-                    "birthday": birthday,
-                    "phone": phone,
+                    "birthday": birthday or None,
+                    "phone": phone or None,
                     "stampCount": stamp_n,
                     "stampTotal": total,
                     "createdAt": SERVER_TIMESTAMP,
@@ -370,28 +370,32 @@ def award_stamp():
 
 
 #LISTING FIREBASE
-@app.get("/cards_list")
-def list_cards():
+@app.get("/card_list")
+def card_list():
     db = get_db()
 
+    limit = int(request.args.get("limit", 200))  # default 200
     docs = (
-        db.collection("cards")
+        db.collection("issuances")
         .order_by("createdAt", direction=firestore.Query.DESCENDING)
-        .limit(20)
+        .limit(limit)
         .get()
     )
 
-    return {
-        "count": len(docs),
-        "cards": [
-            {
-                "object_id": doc.id,
-                "clientName": doc.to_dict().get("clientName"),
-                "createdAt": doc.to_dict().get("createdAt"),
-            }
-            for doc in docs
-        ]
-    }
+    items = []
+    for d in docs:
+        x = d.to_dict()
+        items.append({
+            "issuance_id": d.id,
+            "object_id": x.get("objectId"),
+            "client_name": x.get("clientName"),
+            "phone": x.get("phone"),
+            "birthday": x.get("birthday"),
+            "business": x.get("businessName"),
+            "createdAt": x.get("createdAt"),
+        })
+
+    return {"ok": True, "count": len(items), "items": items}
 
 @app.get("/card/<object_id>")
 def read_card(object_id):
